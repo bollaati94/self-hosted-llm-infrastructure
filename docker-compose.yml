@@ -1,0 +1,134 @@
+services:
+  # Inference Engine: vLLM
+  # Serves the LLM using an OpenAI-compatible API
+  gemma-4:
+    image: vllm/vllm-openai:gemma4-cu130
+    runtime: nvidia
+    shm_size: '16gb'
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+      - VLLM_LOGGING_LEVEL=INFO
+    volumes:
+      - /srv/app/vllm/gemma4-31b-awq-8bit:/root/.cache/huggingface
+    ports:
+      - "8003:8003"
+    command: >
+       RedHatAI/gemma-4-31B-it-FP8-block
+       --host 0.0.0.0
+       --port 8003
+       --max-model-len 201000
+       --gpu-memory-utilization 0.92
+       --kv-cache-dtype fp8
+       --max-num-seqs 2
+       --max-num-batched-tokens 16384
+       --served-model-name gemma4-31b
+       --reasoning-parser gemma4
+       --tool-call-parser gemma4
+       --enable-auto-tool-choice
+       --limit-mm-per-prompt '{"image": 0, "audio": 0}'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 300s
+    restart: unless-stopped
+    networks:
+      - ai_internal
+      - ai_external
+
+  # Database: PostgreSQL
+  # Used for LiteLLM to store usage logs, API keys, and user management
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: litellm
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - /srv/app/postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - ai_internal
+
+  # LLM Gateway: LiteLLM
+  # Provides a unified API, load balancing, and cost tracking
+  litellm:
+    image: docker.litellm.ai/berriai/litellm:main-latest
+    ports:
+      - "4000:4000"
+    volumes:
+      - /srv/app/litellm-config.yaml:/app/config.yaml
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--detailed_debug"]
+    environment:
+      - DATABASE_URL=postgresql://litellm:${POSTGRES_PASSWORD}@postgres:5432/litellm
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+      - UI_USERNAME=${LITELLM_UI_USER:-admin}
+      - UI_PASSWORD=${LITELLM_UI_PASSWORD}
+      - STORE_MODEL_IN_DB=True
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 300s
+    restart: unless-stopped
+    networks:
+      - ai_internal
+      - ai_external
+
+  # User Interface: Open WebUI
+  # Frontend chat interface with LDAP/AD integration
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    ports:
+      - "3000:8080"
+    volumes:
+      - /srv/app/open_webui_data:/app/backend/data
+    environment:
+      - OPENAI_API_BASE_URL=http://litellm:4000/v1
+      - OPENAI_API_KEY=${LITELLM_WEBUI_KEY}
+      - ENABLE_SIGNUP=False
+      - DEFAULT_USER_ROLE=user
+      - ENABLE_LDAP=True
+      - LDAP_SERVER_HOST=${LDAP_HOST}
+      - LDAP_SERVER_PORT=${LDAP_PORT:-389}
+      - LDAP_USE_TLS=False
+      - LDAP_VALIDATE_CERT=False
+      - LDAP_ATTRIBUTE_FOR_USERNAME=sAMAccountName
+      - LDAP_ATTRIBUTE_FOR_MAIL=mail
+      - LDAP_APP_DN=${LDAP_APP_DN}
+      - LDAP_APP_PASSWORD=${LDAP_APP_PASSWORD}
+      - LDAP_SEARCH_BASE=${LDAP_SEARCH_BASE}
+      - LDAP_SEARCH_FILTER=${LDAP_SEARCH_FILTER}
+      - LDAP_CA_CERT_FILE=
+      - ENABLE_LDAP_GROUP_MANAGEMENT=True
+      - ENABLE_LDAP_GROUP_CREATION=True
+      - LDAP_ATTRIBUTE_FOR_GROUPS=memberOf
+      - WEBUI_NAME=AI Assistant
+      - WEBUI_URL=http://${SERVER_HOST:-localhost}:3000
+      - ENABLE_COMMUNITY_SHARING=False
+      - ENABLE_MESSAGE_RATING=False
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
+    depends_on:
+      litellm:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - ai_internal
+      - ai_external
+
+networks:
+  ai_internal:
+    internal: true
+  ai_external:
+    driver: bridge
