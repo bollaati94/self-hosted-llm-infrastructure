@@ -1,0 +1,60 @@
+model_list:
+  - model_name: gemma4-31b
+    litellm_params:
+      model: hosted_vllm/gemma4-31b
+      api_base: http://gemma-4:8003/v1
+      api_key: "none"
+      max_tokens: 32768
+      stream: true
+      timeout: 600
+      stream_timeout: 600
+    model_info:
+      description: "Gemma 4 31B AWQ-8bit – 256k context, multi-turn tool calling"
+      input_cost_per_token: 0.00000010
+      output_cost_per_token: 0.00000060
+      max_tokens: 204800
+      max_input_tokens: 172032
+      max_output_tokens: 32768
+      supports_function_calling: true
+      supports_tool_choice: true
+      supports_parallel_tool_calls: false
+      supports_assistant_prefill: false
+      supports_prompt_caching: false
+      supports_responses_api: false
+      mode: chat
+      drop_params: true
+      forward_client_headers_to_llm_api: false
+    model_info:
+      description: "Gemma 4 31B AWQ-8bit – 256k context"
+      max_tokens: 204800
+      max_input_tokens: 172032
+      max_output_tokens: 32768
+      supports_function_calling: true
+      supports_tool_choice: true
+      supports_parallel_tool_calls: false
+      supports_assistant_prefill: false
+      supports_prompt_caching: false
+      supports_responses_api: false
+      mode: chat
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  store_model_in_db: true
+  enable_audit_logs: true
+  disable_master_key_return: true
+  stream_timeout: 600
+  max_parallel_requests: 4
+
+litellm_settings:
+  telemetry: false
+  drop_params: true
+  request_timeout: 600
+  set_verbose: false
+  json_logs: true
+  buffered_output_streaming: false
+  max_completion_tokens: 32768
+
+router_settings:
+  routing_strategy: simple-shuffle
+  num_retries: 2
